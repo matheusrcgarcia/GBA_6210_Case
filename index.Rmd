@@ -1,0 +1,971 @@
+---
+title: "Case_Study"
+author: "Matheus Cordeiro"
+date: "03/05/2022"
+output:
+  xaringan::moon_reader:
+    seal: FALSE
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,message = FALSE,warning = FALSE)
+```
+
+name: xaringan-title
+class: left, top
+background-image: url(image2.jpg)
+background-size: cover
+
+# German Credit
+
+
+### Group 7 
+
+Chris Carvalho 
+
+Matheus Cordeiro
+
+Tyler Rich 
+
+Wanqian Zhai
+
+---
+
+## 1. Introduction 
+
+.panelset[
+.panel[.panel-name[Context]
+
+The original dataset contains **1000 entries with 32 categorial/symbolic attributes** prepared by Prof. Hofmann. In this dataset, each entry represents a person who takes a **credit by a bank**. Each person is classified as **good or bad credit risks** according to the set of attributes. 
+]
+
+.panel[.panel-name[Content]
+
+It is almost impossible to understand the original dataset due to its complicated system of categories and symbols. Thus, it is necessary **create new variables on the dataset** and **delete others** that we will not going to use. Several columns are simply ignored, because in my opinion either they are not important or their descriptions are obscure. The selected attributes are:
+]
+
+.panel[.panel-name[Selected Attributes]
+- **Age** (numeric)
+
+- **Sex** (text: male, female)
+
+- **Job** (numeric: 0 - unskilled and non-resident, 1 - unskilled and resident, 2 - skilled, 3 - highly skilled)
+
+- **Housing** (text: own, rent, or free)
+
+- **Saving accounts** (text - little, moderate, quite rich, rich)
+
+- **Checking account** (numeric, in DM - Deutsch Mark)
+
+- **Credit amount** (numeric, in DM)
+
+- **Duration** (numeric, in month)
+
+- **Purpose**(text: car, furniture/equipment, radio/TV, domestic appliances, repairs, education, business, vacation/others
+
+- **Risk** (Value target - Good or Bad Risk)
+]
+]
+
+---
+
+## 2. Libraries 
+
+.panelset[
+.panel[.panel-name[Importing Libraries]
+
+```{r libraries}
+library(rmarkdown)
+library(reshape)
+library(tidyverse)
+library(caret)
+library(FNN)
+library(devtools)
+#install.packages("PupillometryR")
+library(PupillometryR)
+#devtools::install_github('cttobin/ggthemr')
+#devtools::install_github("gadenbuie/xaringanExtra")
+library(xaringanExtra)
+#install.packages("ggcorrplot")
+library(ggcorrplot)
+library(ggthemr)
+library(xfun)
+ggthemr("dust")
+```
+
+```{r xaringan-animate-all, echo=FALSE}
+xaringanExtra::use_animate_all(style = "fade")
+```
+
+```{r xaringan-panelset, echo=FALSE}
+xaringanExtra::use_panelset()
+```
+]
+
+.panel[.panel-name[Importing Dataset]
+```{r}
+df <- read.csv("GermanCredit.csv")
+```
+]
+]
+
+---
+
+class: left, top
+
+### First Look 
+
+```{r echo=FALSE}
+paged_table(df, options = list(rows.print = 15, cols.print = 5))
+```
+
+
+```{r echo=FALSE}
+xfun::embed_file('GermanCredit.csv')
+```
+
+---
+
+## 3. Feature Engineering 
+
+
+.panelset[
+.panel[.panel-name[Cleaning]
+
+- Transforming columns 
+- Creating new columns 
+- Deleting columns
+
+```{r cleaning}
+new_df <- df %>% 
+  mutate(SEX=ifelse(MALE_DIV == 0 & MALE_SINGLE == 0 & MALE_MAR_or_WID ==  0,"female","male"),
+         MARITAL_STATUS_MALE=ifelse(MALE_DIV==1,"divorced",ifelse(MALE_SINGLE==1,"single",ifelse(MALE_MAR_or_WID==1,"married or widowed","NA"))),
+         JOB=ifelse(JOB==0,"unskilled non-resident",ifelse(JOB==1,"unskilled resident",ifelse(JOB==2,"skilled employee",ifelse(JOB==3,"highly skilled employee","NA")))),
+         HOUSING=ifelse(RENT==1,"rent",ifelse(OWN_RES==1,"own","free")),
+         SAVING_ACC=ifelse(SAV_ACCT==0,"little",ifelse(SAV_ACCT==1,"moderate",ifelse(SAV_ACCT==2,"quite_rich",ifelse(SAV_ACCT==3,"rich","NA")))),
+         CHECKING_ACC=ifelse(CHK_ACCT==0,"little",ifelse(CHK_ACCT==1,"moderate",ifelse(CHK_ACCT==2,"rich","NA"))),
+         PURPOSE = ifelse(NEW_CAR == 1 | USED_CAR ==1,"Car", ifelse(EDUCATION == 1, "Education", ifelse(FURNITURE ==1, "Furniture", ifelse(RADIO.TV==1,"Radio/TV","Business")))),
+         RISK=ifelse(RESPONSE==1,"Good","Bad"))
+
+keep <- c("OBS.","AGE","SEX","MARITAL_STATUS_MALE","JOB","HOUSING","SAVING_ACC","CHECKING_ACC","AMOUNT","DURATION","PURPOSE","RISK")
+
+new_df <- new_df[,names(new_df) %in% keep]
+new_df <-  new_df[,keep]
+```
+]
+
+.panel[.panel-name[Summary]
+
+```{r}
+#Lokking for missing values and the shape od the dataset
+summary(new_df)
+```
+]
+
+.panel[.panel-name[New Dataset]
+
+```{r echo=FALSE}
+paged_table(new_df, options = list(rows.print = 10, cols.print = 5))
+```
+]
+]
+
+---
+
+## 4. Exploration 
+
+### 4.1 Exploring Target Variable
+
+.pull-left[
+```{r plot-last1, fig.show = 'hide'}
+ggplot(new_df,aes(x=RISK))+
+  geom_bar(stat="count")+
+  labs(title="Target Variable Distribution")
+```
+
+- Borrowers with good credit (or low risk) are more than 2x likely than borrowers with poor credit (high risk)
+
+- Can be used as a baseline when comparing other variables
+]
+
+.pull-right[
+```{r ref.label = 'plot-last1', echo = FALSE}
+```
+]
+
+---
+
+### 4.2 Age Variable
+
+.panelset[
+.panel[.panel-name[General]
+
+#### General Age Distribution
+
+.pull-left[
+```{r plot-last3, out.width = "50%",fig.retina = 3 ,fig.show = 'hide'}
+ggplot(new_df,aes(x=AGE))+
+  geom_bar()+
+  labs(title="General Age Distribution")+ 
+  guides(fill="none")
+```
+
+- Population is skewed left, as younger borrowers are more frequent.  Intuitively, this makes sense as you are more likely to need capital at a younger age (less or no savings).  Younger population is more likely to acquire property (house, car, etc.) and/or start businesses.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last3', echo = FALSE}
+```
+]
+]
+
+.panel[.panel-name[Risk]
+
+#### Age Distribution By Risk Category
+
+.pull-left[
+```{r plot-last2, fig.show = 'hide'}
+ggplot(new_df,aes(x=AGE,fill=RISK))+
+  geom_bar()+
+  facet_wrap(~RISK)+
+  labs(title="Age Distribution")+ 
+  guides(fill="none")
+```
+
+- Risk mirrors the left skew of the overall age population, which implies that age in of itself is not likely a major factor in credit risk
+]
+
+.pull-right[
+```{r ref.label = 'plot-last2', echo = FALSE}
+```
+]
+]
+]
+
+---
+
+### Transforming Age Variable
+
+.panelset[
+.panel[.panel-name[Code]
+
+- Creating an categorical variable
+
+```{r}
+new_df <- new_df %>% 
+  mutate(AGE_CAT=ifelse(AGE<=25,"Student",ifelse(AGE>25&AGE<=35,"Young",ifelse(AGE>35&AGE<=60,"Adult","Senior"))))
+```
+
+```{r plot-last4, fig.show = 'hide'}
+ggplot(new_df, aes(x=AGE_CAT, y=AMOUNT, fill=RISK)) +
+  geom_boxplot()
+```
+
+- Age was transformed into 3 distinct categories for the purposes of variable exploration via boxplot
+]
+
+.panel[.panel-name[Plot]
+.pull-left[
+```{r ref.label = 'plot-last4',out.width = "100%", echo = FALSE}
+```
+]
+.pull-right[
+- There is a distinct "safe" band for low risk borrowers, as those with good credit more frequently borrow less than those with bad credit across all age groups
+
+- Senior age group appears to be the most distinct set of box plots, while for younger or student borrowers it would be difficult to draw conclusions from these two factors alone
+
+- Adult borrowers with bad credit have fewer outliers than the other categories.  Adult borrowers with good credit has a tighter IQR.
+]
+]
+]
+
+---
+
+### 4.3 Housing Variable
+
+.panelset[
+.panel[.panel-name[Risk]
+
+#### Distribution of Housing Owners and Renters by Risk
+
+.pull-left[
+```{r plot-last5, fig.show = 'hide'}
+ggplot(new_df, aes(x=HOUSING, fill=RISK)) +
+  geom_bar(position = "dodge2")
+```
+
+- Borrowers that own a house/condo and are low credit risk have a high correlation
+
+- Distinct trend makes it a good prediction variable to use, even in isolation from other variables
+
+]
+
+.pull-right[
+```{r ref.label = 'plot-last5', echo = FALSE}
+```
+]
+
+]
+
+.panel[.panel-name[Credit Amount]
+
+#### Distribution of Credit Amount by Housing Variable
+.pull-left[
+```{r plot-last6, fig.show = 'hide'}
+dodge <- position_dodge(width = 0.4)
+ggplot(new_df, aes(x=HOUSING, y=AMOUNT, fill=RISK)) +
+  geom_violin(position = dodge)+
+  geom_boxplot(width=.1, outlier.colour=NA, position = dodge) 
+```
+
+- <font size="3">Violin plots for Owners and Renters have similar shapes, although median of amount borrowed for Owners is similar for both credit risk groups and bad credit Renters is shifted higher</font>
+- <font size="3">No significant trend for Borrowers who fit into neither category, other than very wide IQRs and a "flatter" distribution of amount borrowed</font>
+]
+
+.pull-right[
+```{r ref.label = 'plot-last6', echo = FALSE}
+```
+]
+]
+]
+
+---
+
+### 4.4 Age Variable
+
+.panelset[
+.panel[.panel-name[General]
+
+#### Looking at General Diference per Sex
+
+.pull-left[
+```{r plot-last7, fig.show = 'hide'}
+ggplot(new_df, aes(x=SEX, fill=RISK)) +
+  geom_bar(position = "dodge2")
+```
+
+- Similar proportions of high risk borrowers to low risk across both sexes; marginally proportionally better for male borrowers
+
+- Not terribly different from overall population proportion as presented in 4.1
+]
+
+.pull-right[
+```{r ref.label = 'plot-last7', echo = FALSE}
+```
+]
+]
+
+.panel[.panel-name[Credit Amount]
+
+#### Differences in Amount Borrowed per Sex
+
+.pull-left[
+```{r plot-last8, fig.show = 'hide'}
+ggplot(new_df, aes(x=SEX,y=AMOUNT, fill=RISK)) +
+  geom_boxplot(position = "dodge2")
+```
+
+- Fewer female borrower outliers in general, even with similar median
+
+- Male borrowers has tighter grouping of poor credit/high risk outliers
+
+- Male borrowers with poor credit are more likely to borrow a larger amount than low risk male borrowers
+]
+
+.pull-right[
+```{r ref.label = 'plot-last8', echo = FALSE}
+```
+]
+]
+]
+
+---
+
+
+### 4.5 Job Variable
+
+.panelset[
+.panel[.panel-name[General]
+
+#### General Exploration of Job Variable
+
+.pull-left[
+```{r plot-last9, fig.show = 'hide'}
+ggplot(new_df, aes(x=JOB, fill=RISK)) +
+  geom_bar(position = "dodge2") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.4))
+```
+
+- <font size="3">Skilled Employee category dominates the data set</font>
+
+- <font size="3"> Employee and Unskilled Resident have similar proportion of low risk to high risk borrowers, slightly better than the overall population</font>
+
+- <font size="3">Interestingly, Highly Skilled Employee and Unskilled Non-Residents have similar proportion as well, slightly worse than the overall population</font>
+]
+
+.pull-right[
+```{r ref.label = 'plot-last9', echo = FALSE}
+```
+]
+]
+
+.panel[.panel-name[Credit Amount]
+
+#### Difference of the Amount Borrowed per Job Category
+
+.pull-left[
+```{r plot-last10, fig.show = 'hide'}
+new_df <- new_df %>% 
+  mutate(JOB_CHAR = as.character(JOB))
+ggplot(new_df, aes(x=JOB_CHAR, y=AMOUNT,fill=RISK)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.4))
+```
+
+- <font size="3">Highly skilled Employee borrowers with bad credit borrow larger amounts when compared to median of Highly Skilled with good credit.  IQR is similar, however.</font>
+- <font size="3">All other groups have similar medians</font>
+- <font size="3">Skilled Employee borrowers with good credit has a tight IQR, resulting in a large number of outliers.  This may be desirable for training purposes.</font>
+]
+
+.pull-right[
+```{r ref.label = 'plot-last10', echo = FALSE}
+```
+]
+]
+]
+
+---
+
+### 4.6 Credit Distribution  
+
+.pull-left[
+```{r plot-last11, fig.show = 'hide'}
+ggplot(new_df,aes(log(AMOUNT),fill=RISK)) +  
+  geom_histogram(alpha=0.7,bins = 40,position='identity')
+```
+
+- We can tell that most of the creditors have a moderate credit balance.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last11', echo = FALSE}
+```
+]
+
+---
+
+### 4.7 Saving Accounts 
+
+
+.panelset[
+.panel[.panel-name[General]
+
+#### Genereal distribution by Saving Accounts
+
+.pull-left[
+```{r plot-last12, fig.show = 'hide'}
+ggplot(new_df, aes(x=SAVING_ACC, fill=RISK)) +
+  geom_bar(position = "dodge2")
+```
+
+- The groups has higher amount in their saving account are tend to have higher proportion of good credits.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last12', echo = FALSE}
+```
+]
+]
+
+.panel[.panel-name[Credit Amount]
+
+#### Difference of the Amount expent by Saving Accounts
+
+.pull-left[
+```{r plot-last13, fig.show = 'hide'}
+ggplot(new_df, aes(x=SAVING_ACC, y=AMOUNT,fill=RISK)) +
+  geom_boxplot()
+```
+
+- We can conclude that in each amount status of saving account, the people with higher risk of default are tend to have higher amount on credit.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last13', echo = FALSE}
+```
+]
+]
+
+.panel[.panel-name[Age]
+
+#### Difference of the Saving Accounts by Age
+
+.pull-left[
+```{r plot-last14, fig.show = 'hide'}
+ggplot(new_df, aes(x=SAVING_ACC, y=AGE,fill=RISK)) +
+  geom_boxplot()
+```
+
+- It looks like for creditors have a little, moderate or quite rich saving accounts, there are more young high risk creditors than the old ones, but it turns into the opposite way for the rich saving accounts owners.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last14', echo = FALSE}
+```
+]
+]
+]
+
+---
+
+### 4.8 Purpose Variable
+
+.panelset[
+.panel[.panel-name[General]
+
+#### Genereal distribution for purpose
+
+.pull-left[
+```{r plot-last16, fig.show = 'hide'}
+ggplot(new_df, aes(x=PURPOSE, fill=RISK)) +
+  geom_bar(position = "dodge2")
+```
+
+- People uses their money for car and radio or TV are more correlated with the low risk.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last16', echo = FALSE}
+```
+]
+]
+
+.panel[.panel-name[Credit Amount]
+
+#### Difference on the Amount expent by Purpose
+
+.pull-left[
+```{r plot-last17, fig.show = 'hide'}
+ggplot(new_df, aes(x=PURPOSE, y=AMOUNT,fill=RISK)) +
+  geom_boxplot() 
+```
+
+- People with high risk and high credit balance are more likely spend their money in business or car.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last17', echo = FALSE}
+```
+]
+]
+]
+
+---
+
+### 4.9 Duration Variable
+
+.panelset[
+.panel[.panel-name[General]
+
+#### General distribution by Duration
+
+.pull-left[
+```{r plot-last19, fig.show = 'hide'}
+ggplot(new_df, aes(x=DURATION, fill=RISK)) +
+  geom_bar(position = "dodge2")
+```
+
+- There are more low risk creditor until the duration comes to 40 years, beyond that point the number high risk creditors are more than the lower risk ones.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last19', echo = FALSE}
+```
+]
+]
+]
+
+---
+
+### 4.10 Checking Accounts Variable
+
+.panelset[
+.panel[.panel-name[General]
+
+#### Genereal distribution for Checking Account
+
+.pull-left[
+```{r plot-last21, fig.show = 'hide'}
+ggplot(new_df, aes(x=CHECKING_ACC, fill=RISK)) +
+  geom_bar(position = "dodge2")
+```
+
+- Rich people has better portion of good creditors against the bad ones.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last21', echo = FALSE}
+```
+]
+]
+
+.panel[.panel-name[Credit Amount]
+
+#### Difference on the Amount expent by Checking Accounts
+
+.pull-left[
+```{r plot-last22, fig.show = 'hide'}
+ggplot(new_df, aes(x=CHECKING_ACC, y=AMOUNT,fill=RISK)) +
+  geom_boxplot()
+```
+
+- It looks like the creditors with moderate amount in their checking account are tend to have higher balance in their credit account.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last22', echo = FALSE}
+```
+]
+]
+
+.panel[.panel-name[Age]
+
+#### Difference on the Checking Accounts by Age
+
+.pull-left[
+```{r plot-last181, fig.show = 'hide'}
+ggplot(new_df, aes(x=CHECKING_ACC, y=AGE,fill=RISK)) +
+  geom_violin(position = position_dodge(0.8)) 
+```
+
+- We can find some pattern about being a risky creditors with a rich checking account is correlated to 25-35 years old.
+]
+
+.pull-right[
+```{r ref.label = 'plot-last181', echo = FALSE}
+```
+]
+]
+]
+
+
+---
+
+class: center, top
+
+### 4.11 Heatmap
+
+
+.panelset[
+.panel[.panel-name[R Code]
+
+```{r plot-last182, fig.show = 'hide'}
+df_corr <- round(cor(df),2)
+melted_corr <- melt(df_corr)
+ggplot(data = melted_corr, aes(x=X1, y=X2, fill=value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+  midpoint = 0, limit = c(-1,1), space = "Lab", 
+  name="Correlation Scale") + 
+  geom_text(aes(X1, X2, label = value), color = "black", size = 4) +
+  scale_x_discrete(guide = guide_axis(angle = 45))
+```
+]
+
+.panel[.panel-name[Plot]
+
+```{r ref.label = 'plot-last182', echo = FALSE, fig.height=9, fig.width=15}
+```
+]
+]
+
+---
+
+## 5. Prediction Models 
+
+We will test 2 different subsets of our **df** and also all the variables in our **df**:
+
+### 5.0 KNN
+
+#### 5.0.1 Subset 1
+
+.panelset[
+.panel[.panel-name[R Code]
+
+- Sub-setting *df* excluding the first column (**OBS.**)
+
+```{r}
+pred_df_1 <- subset(df,select = -c(OBS.))
+train.index <- sample(row.names(pred_df_1), 0.6*dim(pred_df_1)[1])  
+valid.index <- setdiff(row.names(pred_df_1), train.index)  
+train.df <- pred_df_1[train.index, ]
+valid.df <- pred_df_1[valid.index, ]
+train.norm.df <- train.df
+valid.norm.df <- valid.df
+east.norm.df <- pred_df_1
+norm.values <- preProcess(train.df[, 1:30], method=c("center", "scale"))
+train.norm.df[, 1:30] <- predict(norm.values, train.df[, 1:30])
+valid.norm.df[, 1:30] <- predict(norm.values, valid.df[, 1:30])
+east.norm.df[, 1:30] <- predict(norm.values, east.norm.df[, 1:30])
+accuracy.df <- data.frame(k = seq(1, 30, 1), accuracy = rep(0, 30))
+for(i in 1:30) {
+  knn.pred <- knn(train.norm.df[, 1:30], valid.norm.df[, 1:30], 
+                  cl = train.norm.df[,31], k = i)
+  accuracy.df[i, 2] <- confusionMatrix(as.factor(knn.pred), as.factor(valid.norm.df[,31]))$overall[1] 
+}
+```
+]
+
+.panel[.panel-name[Accuracy Table]
+
+```{r echo=FALSE}
+paged_table(accuracy.df, options = list(rows.print = 5))
+```
+]
+]
+
+---
+
+### 5.0 KNN
+
+#### 5.0.1 Subset 2
+
+- Sub-setting *df* including only the columns that we analyzed on the section 4 of this presentation:
+
+.panelset[
+.panel[.panel-name[R Code]
+
+```{r}
+pred_df_2 <- subset(df,select = -c(OBS.,HISTORY,RETRAINING,EMPLOYMENT,INSTALL_RATE,CO.APPLICANT,GUARANTOR,PRESENT_RESIDENT,REAL_ESTATE,PROP_UNKN_NONE,OTHER_INSTALL,NUM_CREDITS,NUM_DEPENDENTS,TELEPHONE,FOREIGN))
+train.index <- sample(row.names(pred_df_2), 0.6*dim(pred_df_2)[1])  
+valid.index <- setdiff(row.names(pred_df_2), train.index)  
+train.df <- pred_df_2[train.index, ]
+valid.df <- pred_df_2[valid.index, ]
+train.norm.df <- train.df
+valid.norm.df <- valid.df
+east.norm.df <- pred_df_2
+norm.values <- preProcess(train.df[, 1:16], method=c("center", "scale"))
+train.norm.df[, 1:16] <- predict(norm.values, train.df[, 1:16])
+valid.norm.df[, 1:16] <- predict(norm.values, valid.df[, 1:16])
+east.norm.df[, 1:16] <- predict(norm.values, east.norm.df[, 1:16])
+accuracy.df <- data.frame(k = seq(1, 30, 1), accuracy = rep(0, 30))
+for(i in 1:30) {
+  knn.pred <- knn(train.norm.df[, 1:16], valid.norm.df[, 1:16], 
+                  cl = train.norm.df[,17], k = i)
+  accuracy.df[i, 2] <- confusionMatrix(as.factor(knn.pred), as.factor(valid.norm.df[,17]))$overall[1] 
+}
+```
+]
+
+.panel[.panel-name[Accuracy Table]
+
+```{r echo=FALSE}
+paged_table(accuracy.df, options = list(rows.print = 10))
+```
+]
+]
+
+---
+
+### 5.0 KNN
+
+#### 5.0.3 Whole **df**
+
+.panelset[
+.panel[.panel-name[R Code]
+
+```{r}
+train.index <- sample(row.names(df), 0.6*dim(df)[1])  
+valid.index <- setdiff(row.names(df), train.index)  
+train.df <- df[train.index, ]
+valid.df <- df[valid.index, ]
+train.norm.df <- train.df
+valid.norm.df <- valid.df
+east.norm.df <- df
+norm.values <- preProcess(train.df[, 1:31], method=c("center", "scale"))
+train.norm.df[, 1:31] <- predict(norm.values, train.df[, 1:31])
+valid.norm.df[, 1:31] <- predict(norm.values, valid.df[, 1:31])
+east.norm.df[, 1:31] <- predict(norm.values, east.norm.df[, 1:31])
+accuracy.df <- data.frame(k = seq(1, 30, 1), accuracy = rep(0, 30))
+for(i in 1:30) {
+  knn.pred <- knn(train.norm.df[, 1:31], valid.norm.df[, 1:31], 
+                  cl = train.norm.df[,32], k = i)
+  accuracy.df[i, 2] <- confusionMatrix(as.factor(knn.pred), as.factor(valid.norm.df[,32]))$overall[1] 
+}
+```
+]
+
+.panel[.panel-name[Accuracy Table]
+
+```{r echo=FALSE}
+paged_table(accuracy.df, options = list(rows.print = 10))
+```
+]
+]
+
+---
+
+### 5.1 Logistic Regression
+
+#### 5.1.1 Subset 1
+
+.panelset[
+.panel[.panel-name[Train]
+
+#### Train DataSet
+
+```{r}
+train.df_1 <- pred_df_1[train.index, ]
+valid.df_1 <- pred_df_1[valid.index, ]
+logit.reg.train_1 <- glm(RESPONSE ~ ., data = train.df_1, family = "binomial")
+options(scipen=999)
+#summary(logit.reg.train)
+conf_train_1 <- confusionMatrix(as.factor(ifelse(logit.reg.train_1$fitted > 0.5, 1, 0)), as.factor(train.df_1[,15]))
+cat("The accuracy of this model is:",conf_train_1$overall[[1]])
+```
+]
+
+.panel[.panel-name[Validation]
+
+#### Validation DataSet
+
+```{r}
+logit.reg.valid_1 <- glm(RESPONSE ~ ., data = valid.df_1, family = "binomial")
+options(scipen=999)
+#summary(logit.reg.valid)
+conf_valid_1 <- confusionMatrix(as.factor(ifelse(logit.reg.valid_1$fitted > 0.5, 1, 0)),as.factor(valid.df_1[,15]))
+cat("The accuracy of this model is:",conf_valid_1$overall[[1]])
+```
+]
+]
+
+---
+
+### 5.1 Logistic Regression
+
+#### 5.1.1 Subset 2
+
+.panelset[
+.panel[.panel-name[Train]
+
+#### Train DataSet
+
+```{r}
+train.df_2 <- pred_df_2[train.index, ]
+valid.df_2 <- pred_df_2[valid.index, ]
+logit.reg.train_2 <- glm(RESPONSE ~ ., data = train.df_2, family = "binomial")
+options(scipen=999)
+#summary(logit.reg.train)
+conf_train_2 <- confusionMatrix(as.factor(ifelse(logit.reg.train_2$fitted > 0.5, 1, 0)), as.factor(train.df_2[,15]))
+cat("The accuracy of this model is:",conf_train_2$overall[[1]])
+```
+]
+
+.panel[.panel-name[Validation]
+
+#### Validation DataSet
+
+```{r}
+logit.reg.valid_2 <- glm(RESPONSE ~ ., data = valid.df_2, family = "binomial")
+options(scipen=999)
+#summary(logit.reg.valid)
+conf_valid_2 <- confusionMatrix(as.factor(ifelse(logit.reg.valid_2$fitted > 0.5, 1, 0)),as.factor(valid.df_2[,15]))
+cat("The accuracy of this model is:",conf_valid_2$overall[[1]])
+```
+]
+]
+
+---
+
+### 5.1 Logistic Regression
+
+#### 5.1.3 Whole **df**
+
+.panelset[
+.panel[.panel-name[Train]
+
+#### Train DataSet
+
+```{r}
+logit.reg.train <- glm(RESPONSE ~ ., data = train.df, family = "binomial") 
+options(scipen=999)
+#summary(logit.reg.train)
+conf_train <- confusionMatrix(as.factor(ifelse(logit.reg.train$fitted > 0.5, 1, 0)), as.factor(train.df[,15]))
+cat("The accuracy of this model is:",conf_train$overall[[1]])
+```
+]
+
+.panel[.panel-name[Validation]
+
+#### Validation DataSet
+
+```{r}
+logit.reg.valid <- glm(RESPONSE ~ ., data = valid.df, family = "binomial") 
+options(scipen=999)
+#summary(logit.reg.valid)
+conf_valid <- confusionMatrix(as.factor(ifelse(logit.reg.valid$fitted > 0.5, 1, 0)),as.factor(valid.df[,15]))
+cat("The accuracy of this model is:",conf_valid$overall[[1]])
+```
+]
+]
+
+
+---
+
+## 6. Conclusion 
+
+### 6.0 Results 
+
+.panelset[
+.panel[.panel-name[KNN]
+
+- On the first subset (excluding the first column (OBS.)) we got the accuracy of **75% using 10 nearest neighbors**;
+
+- On the second subset (selected columns) we got the accuracy of **72% using 5 nearest neighbors**;
+
+- And using all the variable, we got the accuracy of **74% using 6 nearest neighbors.**
+
+]
+
+.panel[.panel-name[Logistic Regression]
+
+- On the first subset (excluding the first column (OBS.)) we got the accuracy of **56% on both train and validation data sets**;
+
+- On the second subset (selected columns) we got the accuracy of **69% on the training set, and 73.75% on the validation set**;
+
+- And using all the variable, we got the accuracy of **23.8% on the training set, and 25% on the validation set.**
+]
+]
+
+---
+
+### 6.1 Final conclusions, considerations and recommendations 
+
+#### It's important to mention that every time that we run this model, the values of the accuracy will change due to the fact that the sample will be different.
+
+.panelset[
+.panel[.panel-name[KNN]
+
+- Using KNN, we got the highest accuracy on our first model (75%) but we used 10 nearest neighbors. If we compare we the model using all variables, we got 74% using only 5 nearest neighbors.
+  - Since if  As we increase the number of neighbors, the model starts to generalize well, but increasing the value too much would again drop the performance, we would recommend to use the third model.
+
+]
+
+.panel[.panel-name[Logistic Regression]
+
+- For the logistic regression, we could see clearly that the variable "OBS." decrease significantly the accuracy of both models. Therefore, we would recommend use the second model with predict the response of have a good or bad credit risk on 73.75% on the validation set.
+]
+]
+
+---
+
+background-image: url(image1.jpg)
+background-size: cover
+
+---
+
+background-image: url(image3.jpg)
+background-size: cover
